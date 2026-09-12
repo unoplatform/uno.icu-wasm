@@ -7,9 +7,10 @@ RUN apt-get update && apt-get install -y make git python3 doxygen zip wget g++
 
 WORKDIR /icu
 
-RUN wget https://github.com/unicode-org/icu/archive/refs/tags/release-77-1.zip
-RUN unzip release-77-1.zip
-WORKDIR icu-release-77-1/icu4c/source
+COPY icu.zip .
+RUN echo "4d776b33e5016b259b96f86135264f425e5703543d9cfb0cf23f0d923665a742  icu.zip" | sha256sum --check --strict
+RUN unzip icu.zip
+WORKDIR icu-457157a92aa053e632cc7fcfd0e12f8a943b2d11/icu4c/source
 
 ARG IS_MULTITHREADED
 ARG IS_SIMD_SUPPORTED
@@ -37,4 +38,4 @@ RUN emar x stubdata/libicudata.a
 RUN emar rc unoicu.a *.ao unoicu.o
 
 FROM scratch
-COPY --from=build /icu/icu-release-77-1/icu4c/source/unoicu.a /
+COPY --from=build /icu/icu-457157a92aa053e632cc7fcfd0e12f8a943b2d11/icu4c/source/unoicu.a /
