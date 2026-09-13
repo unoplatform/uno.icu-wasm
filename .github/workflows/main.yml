@@ -1,4 +1,4 @@
-name: Build and publish
+name: Release (explicit authorization required)
 
 on:
   push:
@@ -13,6 +13,19 @@ on:
       - release/**
 
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Contracts only by default; release operations sign and publish
+        type: choice
+        default: contracts
+        options: [contracts, release-dev, release-prod]
+      authorize_release:
+        description: Owner explicitly approves signing and publication, not build-only validation
+        type: boolean
+        default: false
+      expected_sha:
+        description: Full reviewed commit SHA (required for a release)
+        type: string
   
 permissions:
   contents: read
@@ -21,11 +34,32 @@ jobs:
   provenance_contracts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: python -m unittest discover -s tests -v
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: |
+          python3 -m venv artifacts/validation-env
+          artifacts/validation-env/bin/python -m pip install --no-cache-dir -r tests/requirements.txt
+          artifacts/validation-env/bin/python -m unittest discover -s tests -v
+
+  release_authorization:
+    needs: provenance_contracts
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.authorize_release && inputs.operation != 'contracts' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: python3 eng/build_only.py authorize
+        env:
+          AUTHORIZE_NATIVE: ${{ inputs.authorize_release }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          BUILD_SCOPE: ${{ inputs.operation }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
 
   build_unoicu:
-    needs: provenance_contracts
+    needs: [provenance_contracts, release_authorization]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -33,7 +67,9 @@ jobs:
         multithreaded: [true, false]
         simd: [true, false]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Free disk space (Linux)
         uses: ./.github/actions/host-cleanup-linux
@@ -64,10 +100,12 @@ jobs:
           path: ./src/unoicu/out/unoicu.a
 
   build_icudt:
-    needs: provenance_contracts
+    needs: [provenance_contracts, release_authorization]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Free disk space (Linux)
         uses: ./.github/actions/host-cleanup-linux
@@ -87,13 +125,15 @@ jobs:
           path: ./src/cldr_data/icudt.dat
 
   build_libicu_windows:
-    needs: provenance_contracts
+    needs: [provenance_contracts, release_authorization]
     runs-on: 'windows-2025'
     
     steps:
       - uses: microsoft/setup-msbuild@v2
     
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
     
       - name: Build ICU
         shell: pwsh
@@ -135,13 +175,15 @@ jobs:
           path: ./libARM64
 
   build_libicu_osx:
-    needs: provenance_contracts
+    needs: [provenance_contracts, release_authorization]
     strategy:
       matrix:
         arch: [ 'x86_64','arm64' ]
     runs-on: ${{ matrix.arch == 'x86_64' && 'macos-15-intel' || 'macos-15' }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Build ICU
         run: |
@@ -207,9 +249,10 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Merge artifacts
         uses: actions/upload-artifact/merge@v4
@@ -272,7 +315,7 @@ jobs:
           setAllVars: true
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v1.7.2
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: 8.0.100
 
@@ -317,7 +360,9 @@ jobs:
         runner: [macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: nuget
@@ -337,7 +382,7 @@ jobs:
 
   sign:
     name: Sign Package
-    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.authorize_release && inputs.expected_sha == github.sha && ((inputs.operation == 'release-dev' && github.ref == 'refs/heads/main') || (inputs.operation == 'release-prod' && startsWith(github.ref, 'refs/heads/release/'))) }}
     runs-on: windows-latest
     environment: PackageSign
 
@@ -352,7 +397,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -371,7 +418,7 @@ jobs:
           path: artifacts/ReleaseEvidence/macos-smoke
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v1
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '9.0.x'
 
@@ -381,7 +428,7 @@ jobs:
       
       # Login to Azure using a ServicePrincipal configured to authenticate agaist a GitHub Action
       - name: 'Az CLI login'
-        uses: azure/login@v1
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
         with:
           allow-no-subscriptions: true
           client-id: ${{ secrets.SIGN_AZURE_CLIENT_ID }}
@@ -452,7 +499,7 @@ jobs:
 
   publish_dev:
     name: Publish Dev
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.authorize_release && inputs.expected_sha == github.sha && inputs.operation == 'release-dev' && github.ref == 'refs/heads/main' }}
     runs-on: windows-latest
 
     needs:
@@ -472,7 +519,7 @@ jobs:
 
   publish_prod:
     name: Publish Production
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.authorize_release && inputs.expected_sha == github.sha && inputs.operation == 'release-prod' && startsWith(github.ref, 'refs/heads/release/') }}
     runs-on: windows-latest
     environment: Production
     needs:
@@ -483,9 +530,10 @@ jobs:
   
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
   
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -534,7 +582,9 @@ jobs:
     runs-on: 'macos-15' # arm64
     needs: build_libicu_osx
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -568,7 +618,9 @@ jobs:
     runs-on: 'macos-15' # arm64
     needs: build_libicu_osx
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Download Artifacts
         uses: actions/download-artifact@v4

@@ -49,7 +49,18 @@ outputs. Python 3 and PowerShell 7 are required for metadata/package work.
 The existing Windows, macOS/iOS and Linux Docker toolchains remain required for
 native compilation. Arrange shared-machine capacity before those builds.
 
-Fast standard-library contracts (no restore/tool installation):
+For **build-only hosted validation**, use the isolated, explicitly authorized
+[`build-only.yml` path](docs/BUILD-ONLY.md). It has no connection to signing,
+NuGet push, release/tag creation, or production environments. Its source/native
+inventories are not attestations. Ordinary push/PR events run only lightweight
+contracts; they cannot start native jobs or publication in the workflows in
+this revision. Remote default-branch automation must still be reviewed before
+publishing a branch/PR; local edits do not disable installed owner automation.
+
+Fast contracts (the provenance/native-entry tests use the standard library;
+workflow policy tests additionally require the pinned PyYAML in
+`tests/requirements.txt`). Reuse an existing compatible installation, or install
+that manifest in an **owned Python virtual environment**, not a shared cache:
 
 ```powershell
 python -m unittest discover -s tests -v
@@ -63,7 +74,14 @@ python tests/notice_pack.py --archive artifacts/icu-source.zip `
 
 ### Native commands after resource approval
 
-`.github/workflows/main.yml` is the authoritative unchanged native matrix.
+`.github/workflows/main.yml` retains the full release matrix including iOS.
+It now requires a manual `release-dev`/`release-prod` operation, explicit
+`authorize_release=true`, an exact `expected_sha`, and the matching main/release
+branch before any native or publishing jobs can run. Its default manual
+operation is `contracts`. Automatic release-on-push is intentionally removed.
+The build-only matrix excludes iOS; it does not relax the four-package release
+pack validation or treat an unverified iOS row as passed.
+
 For example, the Linux filtered-data job is:
 
 ```bash
@@ -154,8 +172,9 @@ after tagging rather than reconstructed.
 The main/dev publish path has only Actions retention plus GitHub's attestation
 service; before using it as a durable distribution source, owners must archive
 its complete `release-evidence` externally or publish an immutable release.
-Never describe 90-day retention as indefinite. Container base tags and hosted
-toolchain images are not fully pinned; this path establishes source/build
+Never describe 90-day retention as indefinite. The build-only path pins Docker image digests and captures installed package and
+tool identities. The legacy release defaults still use base tags, and neither
+path pins apt repositories or hosted runner images; this path establishes source/build
 provenance, **not byte-reproducible native toolchains**.
 
 NuGet.org countersigning may change the final archive hash. Preserve the

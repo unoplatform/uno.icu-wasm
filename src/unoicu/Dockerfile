@@ -1,7 +1,8 @@
 # Build this Dockerfile with  "docker build --build-arg EMSCRIPTEN_VERSION=<your-version> --build-arg IS_MULTITHREADED=<true|false> --build-arg IS_SIMD_SUPPORTED=<true|false> --output type=local,dest=. ." to get the unoicu.a file in the current directory
 ARG EMSCRIPTEN_VERSION
+ARG BUILD_IMAGE=docker.io/emscripten/emsdk:${EMSCRIPTEN_VERSION}
 
-FROM docker.io/emscripten/emsdk:${EMSCRIPTEN_VERSION} AS build
+FROM ${BUILD_IMAGE} AS build
 
 RUN apt-get update && apt-get install -y make git python3 doxygen zip wget g++
 
@@ -36,6 +37,8 @@ RUN emcc -I common -c unoicu.c
 RUN emar x lib/libicuuc.a
 RUN emar x stubdata/libicudata.a
 RUN emar rc unoicu.a *.ao unoicu.o
+RUN python3 -c "import pathlib,subprocess; p=pathlib.Path('/build-evidence'); p.mkdir(); [(p/name).write_bytes(subprocess.check_output(cmd)) for name,cmd in [('packages.txt',['dpkg-query','-W']),('compiler.txt',['emcc','--version']),('make.txt',['make','--version'])]]; (p/'config.log').write_bytes(pathlib.Path('config.log').read_bytes())"
 
 FROM scratch
 COPY --from=build /icu/icu-457157a92aa053e632cc7fcfd0e12f8a943b2d11/icu4c/source/unoicu.a /
+COPY --from=build /build-evidence /build-evidence
