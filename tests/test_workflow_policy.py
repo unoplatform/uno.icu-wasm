@@ -33,14 +33,14 @@ class WorkflowPolicy(unittest.TestCase):
 
     def test_build_only_is_manual_and_read_only(self):
         build = workflow("build-only.yml")
-        self.assertEqual({"workflow_dispatch"}, set(build["on"]))
+        self.assertEqual({"workflow_dispatch", "workflow_call"}, set(build["on"]))
         self.assertEqual({"contents": "read"}, build["permissions"])
         inputs = build["on"]["workflow_dispatch"]["inputs"]
         self.assertEqual("false", inputs["authorize_native"]["default"])
         self.assertEqual(["all", "linux", "windows", "macos"], inputs["target"]["options"])
         text = (ROOT / ".github/workflows/build-only.yml").read_text()
         for forbidden in ("secrets.", "id-token:", "attestations:", "azure/", "sign code",
-                          "nuget push", "gh release", "git push", "workflow_call", "environment:"):
+                          "nuget push", "gh release", "git push", "environment:"):
             self.assertNotIn(forbidden, text)
         for job in build["jobs"].values():
             self.assertNotIn("permissions", job)

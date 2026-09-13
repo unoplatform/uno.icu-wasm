@@ -22,14 +22,13 @@ VARIANTS = {"data": ("",), "wasm": ("st", "mt", "st,simd", "mt,simd"),
             "windows": ("x64", "arm64"), "macos": ("x86_64", "arm64")}
 BUILD_KEYS = ("GITHUB_REPOSITORY", "GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
               "GITHUB_WORKFLOW_REF", "GITHUB_JOB", "RUNNER_OS", "RUNNER_ARCH",
-              "ImageOS", "ImageVersion", "WORKFLOW_SHA")
+              "ImageOS", "ImageVersion", "WORKFLOW_SHA", "DISPATCH_OPERATION")
 
 
 def authorize(env, commit, dirty):
     if (env.get("GITHUB_ACTIONS") != "true" or
             env.get("GITHUB_EVENT_NAME") != "workflow_dispatch" or
-            env.get("GITHUB_REPOSITORY") != "unoplatform/uno.icu" or
-            env.get("AUTHORIZE_NATIVE") != "true"):
+            env.get("GITHUB_REPOSITORY") != "unoplatform/uno.icu"):
         raise ValueError("Explicit owner-repository workflow dispatch required")
     expected = env.get("EXPECTED_SHA", "")
     if (not re.fullmatch("[0-9a-f]{40}", expected) or dirty or
@@ -38,18 +37,32 @@ def authorize(env, commit, dirty):
         raise ValueError("Reviewed source/workflow SHA must match a clean checkout")
     scope = env.get("BUILD_SCOPE")
     ref = env.get("GITHUB_REF", "")
+    workflow = env.get("GITHUB_WORKFLOW_REF")
+    main = f"unoplatform/uno.icu/.github/workflows/main.yml@{ref}"
+    direct = f"unoplatform/uno.icu/.github/workflows/build-only.yml@{ref}"
+    native, release = env.get("AUTHORIZE_NATIVE"), env.get("AUTHORIZE_RELEASE")
+    operation = env.get("DISPATCH_OPERATION", "")
     if scope == "build-only":
+        # Values cross the YAML/environment boundary via toJSON, preserving
+        # boolean type. A string "false", integer 0, missing value or mixed
+        # release/native grant is not an authorization.
+        if native != "true" or release != "false":
+            raise ValueError("Build-only requires native=true and release=false booleans")
         if not ref.startswith("refs/heads/") or env.get("BUILD_TARGET") not in ("all", "linux", "windows", "macos"):
             raise ValueError("Select an approved build-only branch and resource group")
-        filename = "build-only.yml"
-    elif scope == "release-dev" and ref == "refs/heads/main":
-        filename = "main.yml"
-    elif scope == "release-prod" and ref.startswith("refs/heads/release/"):
-        filename = "main.yml"
+        # A local reusable workflow resolves from the caller's exact commit;
+        # GitHub retains the dispatch caller's context, not a new call event.
+        if not ((workflow == main and operation == "build-only") or
+                (workflow == direct and operation == "")):
+            raise ValueError("Unexpected build-only caller/operation identity")
+    elif ((scope == "release-dev" and ref == "refs/heads/main") or
+          (scope == "release-prod" and ref.startswith("refs/heads/release/"))):
+        if native != "false" or release != "true":
+            raise ValueError("Release requires release=true and native=false booleans")
+        if workflow != main or operation != scope:
+            raise ValueError("Unexpected release caller/operation identity")
     else:
         raise ValueError("Release scope/ref mismatch; no implicit publication")
-    if env.get("GITHUB_WORKFLOW_REF") != f"unoplatform/uno.icu/.github/workflows/{filename}@{ref}":
-        raise ValueError("Unexpected workflow identity")
 
 
 def check_authorization():

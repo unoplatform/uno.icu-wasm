@@ -53,9 +53,13 @@ Linux/Windows/macOS **build-only** validation. The parent retains actual
 push/PR/dispatch after reviewing this reconciliation and its trigger boundary.
 Signing, tags, releases and NuGet publication remain unauthorized.
 
-Only `.github/workflows/build-only.yml` is the approved entry. Main's full
-release jobs are retained for compatibility but cannot run from default push/PR
-events and require separate explicit release inputs. This continuation runs
+The approved feature-ref route now dispatches the existing registered
+`main.yml` with `operation=build-only`, native=true and release=false; its
+read-only caller invokes `build-only.yml` with explicit inputs and no inherited
+secrets. **No default-branch merge/registration is needed or authorized.**
+Main's full release jobs are retained for compatibility but cannot run from
+default push/PR or build-only operations and require separate explicit release
+inputs with native=false. This continuation runs
 only lightweight contracts, metadata checks, syntax parsers and a real
 notices-only NuGet fixture. It does not use the local heavy-build slot or claim
 native, physical AT, protected-status, attestation or GA acceptance.

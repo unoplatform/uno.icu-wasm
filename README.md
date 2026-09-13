@@ -57,8 +57,13 @@ outputs. Python 3 and PowerShell 7 are required for metadata/package work.
 The existing Windows, macOS/iOS/tvOS and Linux Docker toolchains remain required for
 native compilation. Arrange shared-machine capacity before those builds.
 
-For **build-only hosted validation**, use the isolated, explicitly authorized
-[`build-only.yml` path](docs/BUILD-ONLY.md). It has no connection to signing,
+For **build-only hosted validation**, dispatch the already registered `main.yml`
+on the reviewed **feature ref** with `operation=build-only`,
+`authorize_native=true`, `authorize_release=false`, `expected_sha` and `target`.
+It calls the isolated [`build-only.yml` child](docs/BUILD-ONLY.md) with explicit
+inputs, `contents: read`, and **no inherited secrets**. No new default-branch
+registration or merge is required or authorized for this route.
+The child has no connection to signing,
 NuGet push, release/tag creation, or production environments. Its source/native
 inventories are not attestations. Ordinary push/PR events run only lightweight
 contracts; they cannot start native jobs or publication in the workflows in
@@ -82,13 +87,17 @@ python tests/notice_pack.py --archive artifacts/icu-source.zip `
 
 ### Native commands after resource approval
 
-`.github/workflows/main.yml` retains the full release matrix including iOS/tvOS.
-It now requires a manual `release-dev`/`release-prod` operation, explicit
-`authorize_release=true`, an exact `expected_sha`, and the matching main/release
-branch before any native or publishing jobs can run. Its default manual
+`.github/workflows/main.yml` retains the full release matrix including iOS/tvOS,
+separate from its approved `operation=build-only` route. Release jobs require
+exactly `release-dev`/`release-prod`, `authorize_release=true`,
+`authorize_native=false`, an exact `expected_sha`, and the matching main/release
+branch. Mixed native/release authorization is rejected. Its default manual
 operation is `contracts`. Automatic release-on-push is intentionally removed.
 The build-only matrix excludes iOS/tvOS; it does not relax the five-package release
 pack validation or treat an unverified Apple static row as passed.
+The build-only manifests remain `runtimeTested=false`: this is stage-one native
+construction. Same-run native/data smoke probes are a separate, explicitly
+documented next stage, not implicitly covered by a successful build.
 
 For example, the Linux filtered-data job is:
 

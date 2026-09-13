@@ -8,6 +8,11 @@ on:
         type: boolean
         required: true
         default: false
+      authorize_release:
+        description: Must remain false; mixed native/release authorization is rejected
+        type: boolean
+        required: true
+        default: false
       expected_sha:
         description: Full reviewed 40-character commit SHA of the selected workflow branch
         type: string
@@ -18,6 +23,20 @@ on:
         required: true
         default: all
         options: [all, linux, windows, macos]
+  workflow_call:
+    inputs:
+      authorize_native:
+        type: boolean
+        required: true
+      authorize_release:
+        type: boolean
+        required: true
+      expected_sha:
+        type: string
+        required: true
+      target:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -27,7 +46,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AUTHORIZE_NATIVE: ${{ inputs.authorize_native }}
+  AUTHORIZE_NATIVE: ${{ toJSON(inputs.authorize_native) }}
+  AUTHORIZE_RELEASE: ${{ toJSON(inputs.authorize_release) }}
+  # A reusable workflow retains its caller's event-input schema. The standalone
+  # dispatcher has no operation field; read the actual event object dynamically.
+  DISPATCH_OPERATION: ${{ fromJSON(toJSON(github.event.inputs)).operation || '' }}
   EXPECTED_SHA: ${{ inputs.expected_sha }}
   BUILD_SCOPE: build-only
   BUILD_TARGET: ${{ inputs.target }}
@@ -37,7 +60,7 @@ env:
 
 jobs:
   authorize:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.authorize_native }}
+    if: ${{ github.event_name == 'workflow_dispatch' && toJSON(inputs.authorize_native) == 'true' && toJSON(inputs.authorize_release) == 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

@@ -17,7 +17,10 @@ import provenance as p
 def authorized(scope="build-only", ref="refs/heads/dev/reviewed"):
     return {
         "GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "workflow_dispatch",
-        "GITHUB_REPOSITORY": "unoplatform/uno.icu", "AUTHORIZE_NATIVE": "true",
+        "GITHUB_REPOSITORY": "unoplatform/uno.icu",
+        "AUTHORIZE_NATIVE": "true" if scope == "build-only" else "false",
+        "AUTHORIZE_RELEASE": "false" if scope == "build-only" else "true",
+        "DISPATCH_OPERATION": "" if scope == "build-only" else scope,
         "GITHUB_SHA": "a" * 40, "EXPECTED_SHA": "a" * 40, "WORKFLOW_SHA": "a" * 40,
         "BUILD_SCOPE": scope, "BUILD_TARGET": "all", "GITHUB_REF": ref,
         "GITHUB_WORKFLOW_REF": f"unoplatform/uno.icu/.github/workflows/{'build-only.yml' if scope == 'build-only' else 'main.yml'}@{ref}",

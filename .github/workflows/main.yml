@@ -1,4 +1,4 @@
-name: Release (explicit authorization required)
+name: ICU validation and explicit release
 
 on:
   push:
@@ -18,14 +18,23 @@ on:
         description: Contracts only by default; release operations sign and publish
         type: choice
         default: contracts
-        options: [contracts, release-dev, release-prod]
+        options: [contracts, build-only, release-dev, release-prod]
+      authorize_native:
+        description: Approve build-only native validation without signing or publication
+        type: boolean
+        default: false
       authorize_release:
         description: Owner explicitly approves signing and publication, not build-only validation
         type: boolean
         default: false
       expected_sha:
-        description: Full reviewed commit SHA (required for a release)
+        description: Full reviewed commit SHA (required for native validation or release)
         type: string
+      target:
+        description: Approved build-only resource group
+        type: choice
+        default: all
+        options: [all, linux, windows, macos]
   
 permissions:
   contents: read
@@ -42,9 +51,31 @@ jobs:
           artifacts/validation-env/bin/python -m pip install --no-cache-dir -r tests/requirements.txt
           artifacts/validation-env/bin/python -m unittest discover -s tests -v
 
+  build_only:
+    needs: provenance_contracts
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && github.repository == 'unoplatform/uno.icu' &&
+          inputs.operation == 'build-only' &&
+          toJSON(inputs.authorize_native) == 'true' && toJSON(inputs.authorize_release) == 'false' &&
+          inputs.expected_sha == github.sha && github.workflow_sha == github.sha &&
+          startsWith(github.ref, 'refs/heads/') }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-only.yml
+    with:
+      authorize_native: ${{ inputs.authorize_native }}
+      authorize_release: ${{ inputs.authorize_release }}
+      expected_sha: ${{ inputs.expected_sha }}
+      target: ${{ inputs.target }}
+
   release_authorization:
     needs: provenance_contracts
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.authorize_release && inputs.operation != 'contracts' }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && github.repository == 'unoplatform/uno.icu' &&
+          toJSON(inputs.authorize_release) == 'true' && toJSON(inputs.authorize_native) == 'false' &&
+          inputs.expected_sha == github.sha && github.workflow_sha == github.sha &&
+          ((inputs.operation == 'release-dev' && github.ref == 'refs/heads/main') ||
+           (inputs.operation == 'release-prod' && startsWith(github.ref, 'refs/heads/release/'))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -53,7 +84,9 @@ jobs:
           persist-credentials: false
       - run: python3 eng/build_only.py authorize
         env:
-          AUTHORIZE_NATIVE: ${{ inputs.authorize_release }}
+          AUTHORIZE_NATIVE: ${{ toJSON(inputs.authorize_native) }}
+          AUTHORIZE_RELEASE: ${{ toJSON(inputs.authorize_release) }}
+          DISPATCH_OPERATION: ${{ github.event.inputs.operation }}
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           BUILD_SCOPE: ${{ inputs.operation }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
@@ -398,7 +431,12 @@ jobs:
 
   sign:
     name: Sign Package
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.authorize_release && inputs.expected_sha == github.sha && ((inputs.operation == 'release-dev' && github.ref == 'refs/heads/main') || (inputs.operation == 'release-prod' && startsWith(github.ref, 'refs/heads/release/'))) }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && github.repository == 'unoplatform/uno.icu' &&
+          toJSON(inputs.authorize_release) == 'true' && toJSON(inputs.authorize_native) == 'false' &&
+          inputs.expected_sha == github.sha && github.workflow_sha == github.sha &&
+          ((inputs.operation == 'release-dev' && github.ref == 'refs/heads/main') ||
+           (inputs.operation == 'release-prod' && startsWith(github.ref, 'refs/heads/release/'))) }}
     runs-on: windows-latest
     environment: PackageSign
 
@@ -515,7 +553,11 @@ jobs:
 
   publish_dev:
     name: Publish Dev
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.authorize_release && inputs.expected_sha == github.sha && inputs.operation == 'release-dev' && github.ref == 'refs/heads/main' }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && github.repository == 'unoplatform/uno.icu' &&
+          toJSON(inputs.authorize_release) == 'true' && toJSON(inputs.authorize_native) == 'false' &&
+          inputs.expected_sha == github.sha && github.workflow_sha == github.sha &&
+          inputs.operation == 'release-dev' && github.ref == 'refs/heads/main' }}
     runs-on: windows-latest
 
     needs:
@@ -535,7 +577,11 @@ jobs:
 
   publish_prod:
     name: Publish Production
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.authorize_release && inputs.expected_sha == github.sha && inputs.operation == 'release-prod' && startsWith(github.ref, 'refs/heads/release/') }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && github.repository == 'unoplatform/uno.icu' &&
+          toJSON(inputs.authorize_release) == 'true' && toJSON(inputs.authorize_native) == 'false' &&
+          inputs.expected_sha == github.sha && github.workflow_sha == github.sha &&
+          inputs.operation == 'release-prod' && startsWith(github.ref, 'refs/heads/release/') }}
     runs-on: windows-latest
     environment: Production
     needs:

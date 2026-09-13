@@ -9,21 +9,42 @@ not a protected hosted job identity or attestation.
 
 ## Authorization boundary
 
-`.github/workflows/build-only.yml` accepts **only `workflow_dispatch`**:
+The approved feature-branch route is the **already registered `main.yml`
+dispatcher** (workflow ID `194395219`), with `operation=build-only`. Its
+`build_only` job calls `./.github/workflows/build-only.yml` using `workflow_call`,
+passing exactly four explicit inputs and `contents: read`, without a `secrets`
+mapping or `secrets: inherit`. The local child resolves from the same reviewed
+commit; it need not be registered on the default branch.
+
+The child also retains standalone `workflow_dispatch` for repositories where
+that entry is already registered. Both paths require:
 
 * `authorize_native`: boolean, default **false**. The owner must separately
   approve source publication, the exact source/workflow SHA, and hosted capacity.
   An input is an acknowledgement, **not** a GitHub environment approval mechanism.
+* `authorize_release`: boolean, default **false** for dispatch. It must remain
+  false. A mixed release/native grant is rejected by the caller, child and entry.
 * `expected_sha`: required full lowercase 40-character commit. The checkout,
   `github.sha` and `github.workflow_sha` must all match, with no local changes.
 * `target`: fixed choice `all` (default), `linux`, `windows`, or `macos`.
   No shell text, source override, image override, runner label, or publish input.
 
-Only `unoplatform/uno.icu` branch dispatches are accepted. Forks, tags, PR refs,
-automatic events and release-workflow identities fail closed. Checkouts do not
+Only `unoplatform/uno.icu` branch dispatches are accepted. The entry recognizes
+exactly `main.yml@<ref>` with actual dispatch operation `build-only`, or
+`build-only.yml@<ref>` without a dispatcher operation. Reusable workflows retain
+the caller's GitHub event/workflow context; the event must still be
+`workflow_dispatch`, not a fabricated `workflow_call` event.
+Forks, tags, PR refs, other callers, cross-ref/SHA identities, automatic events
+and release operations fail closed. Checkouts do not
 persist credentials. All new actions are pinned to full commits.
 
-The workflow has `contents: read`, no job permission escalation, no reusable
+Guards use `toJSON` to distinguish typed booleans from strings/numbers, including
+the YAML-to-process environment boundary. Neither `"false"` nor `0` is accepted
+as boolean false. Release authorization and every sign/publish job require
+**exactly** `release-dev` or `release-prod`, release=true and native=false.
+`operation=build-only` cannot reach them even with release=true or malformed flags.
+
+The child workflow has `contents: read`, no job permission escalation, no reusable
 release workflow calls, no production environment, no secret references, no
 OIDC/attestation permissions, no NuGet pack/sign/publish entrypoint, and no
 repository mutation commands. GitHub's normal artifact runtime capability is
@@ -44,13 +65,17 @@ settings/protections are changed here, and no approval is inferred from WRITE.
 | `build-only.yml`, authorized exact-SHA branch | Graph below, fixed selected group | `contents: read`, Actions artifact upload only |
 | `main.yml`, push/PR to main/release | Provenance/workflow contracts only | `contents: read` |
 | `main.yml`, manual default `contracts` | Contracts only | `contents: read` |
+| `main.yml`, `build-only`, native=true/release=false | Local build-only child, then graph below | Explicit `contents: read`, no inherited secrets |
+| Either entry, mixed native/release grant | No native/sign/publish jobs | None beyond read-only contracts |
 | `main.yml`, explicit authorized `release-dev` on main | Existing full native/package/smoke/sign + dev publish | Legacy signing/OIDC/attestation/NuGet access, only after authorization |
 | `main.yml`, explicit authorized `release-prod` on release branch | Existing full native/package/smoke/sign + production publish/tag/release | Legacy `PackageSign`/`Production` gates and write permissions |
 | Conventional-commits PR workflow | Read-only commit validation | `contents: read`, no token env or persisted checkout credentials |
 | Labeler | Manual informational echo only; automatic label action removed | `contents: read` |
 
 ```text
-manual authorize + exact SHA + contracts -> source archive/notices/inventory
+registered main dispatch operation=build-only
+  -> local build-only child, native=true/release=false
+     -> authorize + exact SHA + contracts -> source archive/notices/inventory
   -> data (Linux Docker) -------------------------------+
   -> wasm [3.1.56, 5.0.6] x [st, mt, st,simd, mt,simd] -+
   -> windows [x64, arm64] (Windows 2025 C++) ------------+-> staging (all only)
@@ -72,21 +97,24 @@ This is not a runtime smoke job: no runtime/UI/physical-input claim is made.
 
 ## Candidate commands — **not authorization to execute**
 
-The workflow must first be registered on the repository's default branch.
-A feature-only new workflow is not reliably dispatchable merely by pushing it.
-Parent/owner must obtain publication approval, review current remote work, and
-integrate without force-pushing or overwriting newer commits. Existing
+**No new default-branch registration or main merge is required.** Dispatch the
+existing registered `main.yml` on the published reviewed feature ref. The
+feature version supplies the new inputs and same-commit local child. Do not
+request or perform a default-branch merge as a prerequisite for this route.
+Parent/owner retains publication and actual dispatch after safety review,
+without force-pushing or overwriting newer commits. Existing
 `pull_request_target` workflows from the remote **base** and installed Apps
 can act before these local policy changes are merged. Audit/approve that
 publication consequence separately; this checkout does not control those Apps.
 
 After those approvals and a capacity grant, a parent may execute, substituting
-the **published, reviewed** branch and commit (not an unregistered local SHA):
+the **published, reviewed** branch and commit (not an unpublished local SHA):
 
 ```powershell
-gh workflow run build-only.yml --repo unoplatform/uno.icu `
+gh workflow run main.yml --repo unoplatform/uno.icu `
   --ref <reviewed-branch> `
-  -f expected_sha=<full-reviewed-commit> -f target=all -f authorize_native=true
+  -f operation=build-only -f authorize_native=true -f authorize_release=false `
+  -f expected_sha=<full-reviewed-commit> -f target=all
 ```
 
 `target=linux`, `windows`, or `macos` bounds a separate resource grant. Partial
@@ -191,6 +219,30 @@ package input shapes, **not nupkgs**. No iOS/tvOS placeholders are created and
 three-package pack/runtime validation or protected attestation is a separate,
 explicitly authorized follow-up; do not waive the missing rows.
 
+## Native smoke is stage two, not a build claim
+
+This route intentionally completes **stage one: build and inventory** first.
+Every row's `runtimeTested=false` remains truthful. A successful header/lipo
+check is not ICU API/data execution, signing or attestation acceptance.
+
+The next independently reported probe stage must:
+
+1. Verify and select the **same run/attempt/source** data bundle plus the new
+   Windows x64 row and each matching macOS thin row; check all recorded hashes.
+2. Reuse the assertions in `tests/icu_smoke.py` for ICU 77.1, selected locales,
+   line breaking, script properties and bidi, using those exact libraries and
+   `icudt.dat` in fresh process-local directories on matching native runners.
+3. Record separate probe JSON identifying the input bundle manifests and actual
+   library/data hashes. Preserve, rather than rewrite, the build manifests.
+
+The existing smoke entry currently takes a **nupkg**, not raw row artifacts.
+A raw-library/data adapter reusing those assertions is a follow-up; it is **not
+implemented or run by this dispatcher fix**. Do not fabricate packages, use old
+payloads, bypass the five-package pack guard, or claim smoke success from
+`runtimeTested=false`. Parent-owned native UI/physical AT checks follow coherent
+artifacts and are separate again. Self-reported inventories do not close
+signature, protected-attestation or historical proof requirements.
+
 ## Focused regression procedure
 
 Reuse installed dependencies or an owned venv containing `tests/requirements.txt`:
@@ -205,8 +257,13 @@ actionlint -shellcheck= -pyflakes= .github/workflows/build-only.yml `
 git diff --check
 ```
 
-The policy tests exercise manual opt-in, default-event isolation, fixed matrices,
-least privilege and no cross-workflow release reachability. Entry tests cover
+The policy tests evaluate the **actual YAML guards**, including the complete
+600-case operation x native/release boolean x ref x repository x event table,
+1,500 malformed-flag cases, caller/ref/SHA mismatches and direct-entry opt-in.
+They model Actions truthiness/loose comparison and verify explicit child
+permissions/input forwarding with no secret inheritance. This is local policy
+coverage, not a hosted workflow execution or protected job identity.
+Entry tests also cover
 wrong source/run/scope, incomplete/wrong-architecture payloads, and retained
 failed-command evidence. The NuGet fixture packs real full notices only and is
 explicitly nonshipping. Actionlint validates Actions YAML/contexts/graphs;
